@@ -270,10 +270,12 @@ impl Miner {
 
                 // Update progress bar every 100 batches
                 let elapsed = timer.elapsed().as_secs();
+                let hashes_per_second = (x_batch_size as usize * INDEX_SPACE) as f64 / elapsed as f64;
                 progress_bar.set_message(format!(
-                    "Mining with GPU... (Best difficulty: {}, Time Remaining: {}s)",
+                    "Mining with GPU... (Best difficulty: {}, Hashes/s: {:.2}, Time: {}s)",
                     xbest_difficulty,
-                    cutoff_time.saturating_sub(elapsed)
+                    hashes_per_second as f64,
+                    elapsed
                 ));
 
                 // Exit if time has elapsed

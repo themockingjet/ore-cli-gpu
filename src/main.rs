@@ -158,6 +158,12 @@ async fn main() {
             miner.config().await;
         }
         Commands::Mine(args) => {
+            #[cfg(feature = "gpu")]
+            println!("Mining with GPU...");
+
+            #[cfg(not(feature = "gpu"))]
+            println!("Mining with CPU...");
+
             miner.mine(args).await;
         }
         Commands::Rewards(_) => {
