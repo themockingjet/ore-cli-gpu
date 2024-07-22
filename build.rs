@@ -32,7 +32,7 @@ fn main() {
         .compile("drillx.a");
 
     // Add link directory
-    println!("cargo:rustc-link-search=native=/usr/local/cuda/lib64");
+    println!("cargo:rustc-link-search=native=/usr/local/cuda-12.5/lib64");
     println!("cargo:rustc-link-lib=cudart");
     println!("cargo:rustc-link-lib=cuda");
 
