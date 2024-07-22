@@ -186,53 +186,40 @@ impl Miner {
     #[cfg(feature = "gpu")]
     async fn find_hash_gpu(proof: Proof, cutoff_time: u64) -> Solution {
         let threads = num_cpus::get();
-
-        // Progress Bar
         let progress_bar = Arc::new(spinner::new_progress_bar());
         progress_bar.set_message("Mining with GPU...");
-
-        // Initialize
+    
         let timer = Instant::now();
         let proof = proof.clone();
-
-        // Constants
         const INDEX_SPACE: usize = 65536;
         let x_batch_size = unsafe { BATCH_SIZE };
-
-        // Hashes
+    
         let mut hashes = vec![0u64; x_batch_size as usize * INDEX_SPACE];
-
-        // nonce
-        let mut x_nonce = 0u64;
-
-        // Final results
-        let mut xbest_nonce = 0;
-        let mut xbest_difficulty = 0;
-        let mut xbest_hash = Hash::default();
-
+        let mut x_nonce = rand::thread_rng().gen::<u64>();
+    
+        // Shared state wrapped in Arc<Mutex<>>
+        let xbest = Arc::new(Mutex::new((0, 0, Hash::default())));
+    
         loop {
-            let total_nonces = x_batch_size as usize * INDEX_SPACE;
-
             unsafe {
-                // use GPU for hashing
+                // Use GPU for hashing
                 hash(
                     proof.challenge.as_ptr(),
                     &x_nonce as *const u64 as *const u8,
                     hashes.as_mut_ptr() as *mut u64,
                 );
-
-                // use CPU for solving
+    
+                // Parallel processing with Rayon
                 let chunk_size = x_batch_size as usize / threads;
-                let handles = (0..threads).into_par_iter().map(|i| {
+                let handles: Vec<(u64, u32, Hash)> = (0..threads).into_par_iter().map(|i| {
                     let hashes = hashes.clone();
-            
                     let start = i * chunk_size;
                     let end = if i + 1 == threads { x_batch_size as usize } else { start + chunk_size };
-            
+    
                     let mut best_nonce = 0;
                     let mut best_difficulty = 0;
-                    let mut best_hash = Hash::default(); // Assuming Hash::default() is valid
-            
+                    let mut best_hash = Hash::default();
+    
                     for i in start..end {
                         let mut digest = [0u8; 16];
                         let mut sols = [0u8; 4];
@@ -245,55 +232,58 @@ impl Miner {
                         if u32::from_le_bytes(sols) > 0 {
                             let solution = Solution::new(digest, (x_nonce + i as u64).to_le_bytes());
                             let difficulty = solution.to_hash().difficulty();
-                            if  solution.is_valid(&proof.challenge) && difficulty > xbest_difficulty {
+                            if solution.is_valid(&proof.challenge) && difficulty > best_difficulty {
                                 best_nonce = u64::from_le_bytes(solution.n);
                                 best_difficulty = difficulty;
                                 best_hash = solution.to_hash();
                             }
                         }
                     }
-            
+    
                     (best_nonce, best_difficulty, best_hash)
-                }).reduce_with(|a, b| {
-                    if a.1 > b.1 { a } else { b }
-                }).unwrap();
-            
-
-                if handles.1 > xbest_difficulty {
-                    xbest_nonce = handles.0;
-                    xbest_difficulty = handles.1;
-                    xbest_hash = handles.2;
+                }).collect();
+    
+                // Lock the Mutex to update shared state
+                {
+                    let mut xbest = xbest.lock().unwrap();
+                    let best_result = handles.into_iter().max_by_key(|&(_, diff, _)| diff).unwrap();
+                    if best_result.1 > xbest.1 {
+                        *xbest = best_result;
+                    }
                 }
-
+    
                 // Increment nonce for next batch
-                x_nonce += total_nonces as u64;
-
-                // Update progress bar every 100 batches
+                x_nonce = x_nonce.wrapping_add(x_batch_size as u64);
+    
+                // Update progress bar
                 let elapsed = timer.elapsed().as_secs();
+                let best_difficulty = {
+                    let xbest = xbest.lock().unwrap();
+                    xbest.1
+                };
                 progress_bar.set_message(format!(
                     "Mining with GPU... (Best difficulty: {}, Time Remaining: {}s)",
-                    xbest_difficulty,
+                    best_difficulty,
                     cutoff_time.saturating_sub(elapsed)
                 ));
-
-                // Exit if time has elapsed
+    
                 if timer.elapsed().as_secs() >= cutoff_time {
-                    if xbest_difficulty > ore_api::consts::MIN_DIFFICULTY {
+                    let xbest = xbest.lock().unwrap();
+                    if xbest.1 > ore_api::consts::MIN_DIFFICULTY {
                         break;
                     }
                 }
-                // End of batch
             }
         }
-
-        // Update log
+    
+        let final_best = xbest.lock().unwrap(); // Lock and get final best result
         progress_bar.finish_with_message(format!(
             "Best hash: {} (difficulty: {})",
-            bs58::encode(xbest_hash.h).into_string(),
-            xbest_difficulty
+            bs58::encode(final_best.2.h).into_string(),
+            final_best.1
         ));
-
-        Solution::new(xbest_hash.d, xbest_nonce.to_le_bytes())
+    
+        Solution::new(final_best.2.d, final_best.0.to_le_bytes())
     }
 
 
