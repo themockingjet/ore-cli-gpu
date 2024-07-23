@@ -104,13 +104,13 @@ impl Miner {
                 let proof = proof.clone();
                 let progress_bar = progress_bar.clone();
                 let mut memory = equix::SolverMemory::new();
-                let difficulties = difficulties.clone();
                 move || {
                     let timer = Instant::now();
                     let mut nonce = u64::MAX.saturating_div(threads).saturating_mul(i);
                     let mut best_nonce = nonce;
                     let mut best_difficulty = 0;
                     let mut best_hash = Hash::default();
+                    let mut total_nonces = 0;
                     loop {
                         // Create hash
                         if let Ok(hx) = drillx::hash_with_memory(
@@ -123,8 +123,6 @@ impl Miner {
                                 best_nonce = nonce;
                                 best_difficulty = difficulty;
                                 best_hash = hx;
-                                let mut difficulties = difficulties.lock().unwrap();
-                                difficulties[i as usize] = best_difficulty;
                             }
                         }
 
@@ -136,24 +134,20 @@ impl Miner {
                                     break;
                                 }
                             } else if i == 0 {
-                                let difficulties = difficulties.lock().unwrap();
-                                let message = difficulties.iter().enumerate()
-                                    .map(|(i, &diff)| format!("T{}: {}", i, diff))
-                                    .collect::<Vec<_>>().join("\n");
                                 progress_bar.set_message(format!(
-                                    "Mining... ({} sec remaining) [{}]",
+                                    "Mining... ({} sec remaining)",
                                     cutoff_time.saturating_sub(timer.elapsed().as_secs()),
-                                    message,
                                 ));
                             }
                         }
 
                         // Increment nonce
-                        nonce = nonce.saturating_add(999);
+                        nonce = nonce.saturating_add(1);
+                        total_nonces += 1;
                     }
 
                     // Return the best nonce
-                    (best_nonce, best_difficulty, best_hash)
+                    (best_nonce, best_difficulty, best_hash, total_nonces)
                 }
             })
         })
@@ -163,21 +157,31 @@ impl Miner {
         let mut best_nonce = 0;
         let mut best_difficulty = 0;
         let mut best_hash = Hash::default();
+        let mut total_nonces = 0;
         for h in handles {
-            if let Ok((nonce, difficulty, hash)) = h.join() {
+            // if let Ok((nonce, difficulty, hash)) = h.join() {
+            //     if difficulty > best_difficulty {
+            //         best_difficulty = difficulty;
+            //         best_nonce = nonce;
+            //         best_hash = hash;
+            //     }
+            // }
+            if let Ok((nonce, difficulty, hash, nonces)) = h.join() {
                 if difficulty > best_difficulty {
                     best_difficulty = difficulty;
                     best_nonce = nonce;
                     best_hash = hash;
                 }
+                total_nonces += nonces;
             }
         }
 
         // Update log
         progress_bar.finish_with_message(format!(
-            "Best hash: {} (difficulty: {})",
+            "Best hash: {} (difficulty: {}) [Hash power: {:.2} H/s]",
             bs58::encode(best_hash.h).into_string(),
-            best_difficulty
+            best_difficulty,
+            total_nonces as f64 / cutoff_time as f64,
         ));
 
         Solution::new(best_hash.d, best_nonce.to_le_bytes())
@@ -197,7 +201,7 @@ impl Miner {
         let x_batch_size = unsafe { BATCH_SIZE };
     
         let mut hashes = vec![0u64; x_batch_size as usize * INDEX_SPACE];
-        let mut x_nonce = rand::thread_rng().gen::<u64>();
+        let mut x_nonce = 0u64;
         let mut processed = 0;
     
         // Shared state wrapped in Arc<Mutex<>>
@@ -263,7 +267,7 @@ impl Miner {
             }
     
             // Increment nonce for next batch
-            x_nonce = x_nonce.wrapping_add(x_batch_size as u64);
+            x_nonce += x_batch_size as u64;
             processed += x_batch_size as usize;
     
             // Update progress bar
