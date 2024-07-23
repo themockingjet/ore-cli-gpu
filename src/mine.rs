@@ -11,7 +11,7 @@ use drillx::{
 extern "C" {
     pub static BATCH_SIZE: u32;
     pub fn hash(challenge: *const u8, nonce: *const u8, out: *mut u64);
-    pub fn solve_all_stages(hashes: *const u64, out: *mut u8, sols: *mut u32);
+    pub fn solve_all_stages(hashes: *const u64, out: *mut u8, sols: *mut u32, num_sets: i32);
 }
 
 use ore_api::{
@@ -192,12 +192,13 @@ impl Miner {
     
         let timer = Instant::now();
         let proof = proof.clone();
-
+    
         const INDEX_SPACE: usize = 65536;
         let x_batch_size = unsafe { BATCH_SIZE };
     
         let mut hashes = vec![0u64; x_batch_size as usize * INDEX_SPACE];
         let mut x_nonce = rand::thread_rng().gen::<u64>();
+        let mut processed = 0;
     
         // Shared state wrapped in Arc<Mutex<>>
         let xbest = Arc::new(Mutex::new((0, 0, Hash::default())));
@@ -211,33 +212,35 @@ impl Miner {
                     hashes.as_mut_ptr() as *mut u64,
                 );
             }
-                
+            
+            // Allocate memory for results
+            let mut digest = vec![0u8; x_batch_size as usize * 16]; // 16 bytes per solution
+            let mut sols = vec![0u32; x_batch_size as usize];
+    
+            unsafe {
+                // Use GPU for solving all stages
+                solve_all_stages(
+                    hashes.as_ptr(),
+                    digest.as_mut_ptr(),
+                    sols.as_mut_ptr(),
+                    x_batch_size as i32,
+                );
+            }
     
             // Parallel processing with Rayon
             let chunk_size = x_batch_size as usize / threads;
             let handles: Vec<(u64, u32, Hash)> = (0..threads).into_par_iter().map(|i| {
-                let hashes = hashes.clone();
                 let start = i * chunk_size;
                 let end = if i + 1 == threads { x_batch_size as usize } else { start + chunk_size };
-
+    
                 let mut best_nonce = 0;
                 let mut best_difficulty = 0;
                 let mut best_hash = Hash::default();
-
+    
                 for i in start..end {
-                    let mut digest = [0u8; 16];
-                    let mut sols = [0u8; 4];
-                    
-                    unsafe {
-                        let batch_start = hashes.as_ptr().add(i * INDEX_SPACE);
-                        solve_all_stages(
-                            batch_start,
-                            digest.as_mut_ptr(),
-                            sols.as_mut_ptr() as *mut u32,
-                        );
-                    }
-                    if u32::from_le_bytes(sols) > 0 {
-                        let solution = Solution::new(digest, (x_nonce + i as u64).to_le_bytes());
+                    if sols[i] > 0 {
+                        let solution_digest = &digest[i * 16..(i + 1) * 16];
+                        let solution = Solution::new(solution_digest.try_into().unwrap(), (x_nonce + i as u64).to_le_bytes());
                         let difficulty = solution.to_hash().difficulty();
                         if solution.is_valid(&proof.challenge) && difficulty > best_difficulty {
                             best_nonce = u64::from_le_bytes(solution.n);
@@ -246,10 +249,10 @@ impl Miner {
                         }
                     }
                 }
-
+    
                 (best_nonce, best_difficulty, best_hash)
             }).collect();
-
+    
             // Lock the Mutex to update shared state
             {
                 let mut xbest = xbest.lock().unwrap();
@@ -258,29 +261,31 @@ impl Miner {
                     *xbest = best_result;
                 }
             }
-
+    
             // Increment nonce for next batch
             x_nonce = x_nonce.wrapping_add(x_batch_size as u64);
-
+            processed += x_batch_size as usize;
+    
             // Update progress bar
             let elapsed = timer.elapsed().as_secs();
             let best_difficulty = {
                 let xbest = xbest.lock().unwrap();
                 xbest.1
             };
+    
             progress_bar.set_message(format!(
-                "Mining with GPU... (Best difficulty: {}, Time Remaining: {}s)",
+                "Mining with GPU... (Best difficulty: {}, Time Remaining: {}s, Hashes/s: {:.2})",
                 best_difficulty,
-                cutoff_time.saturating_sub(elapsed)
+                cutoff_time.saturating_sub(elapsed),
+                processed as f64 / elapsed as f64
             ));
-
+    
             if timer.elapsed().as_secs() >= cutoff_time {
                 let xbest = xbest.lock().unwrap();
                 if xbest.1 > ore_api::consts::MIN_DIFFICULTY {
                     break;
                 }
             }
-            
         }
     
         let final_best = xbest.lock().unwrap(); // Lock and get final best result
