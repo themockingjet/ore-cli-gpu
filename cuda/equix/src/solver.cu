@@ -79,7 +79,7 @@ __device__ unsigned int atomicSub_u16(uint16_t *address, uint16_t val) {
   return old;
 }
 
-static void build_solution_stage1(equix_idx* output, solver_heap* heap, s2_idx root) {
+__device__ void build_solution_stage1(equix_idx* output, solver_heap* heap, s2_idx root) {
 	u32 bucket = ITEM_BUCKET(root);
 	u32 bucket_inv = INVERT_BUCKET(bucket);
 	u32 left_parent_idx = ITEM_LEFT_IDX(root);
@@ -93,7 +93,7 @@ static void build_solution_stage1(equix_idx* output, solver_heap* heap, s2_idx r
 	}
 }
 
-static void build_solution_stage2(equix_idx* output, solver_heap* heap, s3_idx root) {
+__device__ void build_solution_stage2(equix_idx* output, solver_heap* heap, s3_idx root) {
 	u32 bucket = ITEM_BUCKET(root);
 	u32 bucket_inv = INVERT_BUCKET(bucket);
 	u32 left_parent_idx = ITEM_LEFT_IDX(root);
@@ -108,7 +108,7 @@ static void build_solution_stage2(equix_idx* output, solver_heap* heap, s3_idx r
 	}
 }
 
-static void build_solution(equix_solution* solution, solver_heap* heap, s3_idx left, s3_idx right) {
+__device__ void build_solution(equix_solution* solution, solver_heap* heap, s3_idx left, s3_idx right) {
 	build_solution_stage2(&solution->idx[0], heap, left);
 	build_solution_stage2(&solution->idx[4], heap, right);
 	if (!tree_cmp4(&solution->idx[0], &solution->idx[4])) {
@@ -119,7 +119,7 @@ static void build_solution(equix_solution* solution, solver_heap* heap, s3_idx l
 	}
 }
 
-static void solve_stage0(uint64_t* hashes, solver_heap* heap) {
+__device__ void solve_stage0(uint64_t* hashes, solver_heap* heap) {
 	CLEAR(heap->stage1_indices.counts);
 	for (u32 i = 0; i < INDEX_SPACE; ++i) {
 		uint64_t value = hashes[i];
@@ -160,7 +160,7 @@ __device__ void hash_stage0i(hashx_ctx* hash_func, uint64_t* out, uint32_t i) {
             sum / NUM_COARSE_BUCKETS; /* 37 bits */                           \
     }                                                                         \
 
-static void solve_stage1(solver_heap* heap) {
+__device__ void solve_stage1(solver_heap* heap) {
 	CLEAR(heap->stage2_indices.counts);
 	for (u32 bucket_idx = BUCK_START; bucket_idx < BUCK_END; ++bucket_idx) {
 		u32 cpl_bucket = INVERT_BUCKET(bucket_idx);
@@ -209,7 +209,7 @@ static void solve_stage1(solver_heap* heap) {
             sum / NUM_COARSE_BUCKETS; /* 22 bits */                           \
     }                                                                         \
 
-static void solve_stage2(solver_heap* heap) {
+__device__ void solve_stage2(solver_heap* heap) {
 	CLEAR(heap->stage3_indices.counts);
 	for (u32 bucket_idx = BUCK_START; bucket_idx < BUCK_END; ++bucket_idx) {
 		u32 cpl_bucket = INVERT_BUCKET(bucket_idx);
@@ -258,7 +258,7 @@ static void solve_stage2(solver_heap* heap) {
         }                                                                     \
     }                                                                         \
 
-static uint32_t solve_stage3(solver_heap* heap, equix_solution output[EQUIX_MAX_SOLS]) {
+__device__ uint32_t solve_stage3(solver_heap* heap, equix_solution output[EQUIX_MAX_SOLS]) {
 	uint32_t sols_found = 0;
 
 	for (u32 bucket_idx = BUCK_START; bucket_idx < BUCK_END; ++bucket_idx) {
@@ -288,15 +288,30 @@ static uint32_t solve_stage3(solver_heap* heap, equix_solution output[EQUIX_MAX_
 	return sols_found;
 }
 
-// int equix_solver_solve(uint64_t* hashes, solver_heap* heap, equix_solution output[EQUIX_MAX_SOLS]);
-uint32_t equix_solver_solve(
-	uint64_t* hashes,
-	solver_heap* heap,
-	equix_solution output[EQUIX_MAX_SOLS])
-{
-	solve_stage0(hashes, heap);
-	solve_stage1(heap);
-	solve_stage2(heap);
-	return solve_stage3(heap, output);
+// GPU kernel
+__global__ void solve_all_stages_kernel(uint64_t* hashes, solver_heap* heaps, equix_solution* solutions, uint32_t* num_sols) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    uint64_t* thread_hashes = hashes + (idx * INDEX_SPACE);
+    solver_heap* thread_heap = &heaps[idx];
+    equix_solution* thread_solutions = &solutions[idx * EQUIX_MAX_SOLS];
+    
+    solve_stage0(thread_hashes, thread_heap);
+    solve_stage1(thread_heap);
+    solve_stage2(thread_heap);
+    num_sols[idx] = solve_stage3(thread_heap, thread_solutions);
 }
+
+// CPU
+// int equix_solver_solve(uint64_t* hashes, solver_heap* heap, equix_solution output[EQUIX_MAX_SOLS]);
+// uint32_t equix_solver_solve(
+// 	uint64_t* hashes,
+// 	solver_heap* heap,
+// 	equix_solution output[EQUIX_MAX_SOLS])
+// {
+// 	solve_stage0(hashes, heap);
+// 	solve_stage1(heap);
+// 	solve_stage2(heap);
+// 	return solve_stage3(heap, output);
+// }
 

@@ -3,6 +3,12 @@
 A command line interface for ORE cryptocurrency mining.
 
 ## Install
+```sh
+curl https://sh.rustup.rs -sSf | sh
+```
+```sh
+sh -c "$(curl -sSfL https://release.solana.com/v1.18.18/install)"
+```
 
 To install the CLI, use [cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html):
 

@@ -8,7 +8,7 @@
 #include "equix/src/solver_heap.h"
 #include "hashx/src/context.h"
 
-const int BATCH_SIZE = 256;
+const int BATCH_SIZE = 512;
 
 extern "C" void hash(uint8_t *challenge, uint8_t *nonce, uint64_t *out) {
     // Allocate pinned memory for ctxs and hash_space
@@ -65,24 +65,48 @@ __global__ void do_hash_stage0i(hashx_ctx** ctxs, uint64_t** hash_space) {
     }
 }
 
-extern "C" void solve_all_stages(uint64_t *hashes, uint8_t *out, uint32_t *sols) {
-    // Create an equix context
-    equix_ctx* ctx = equix_alloc(EQUIX_CTX_SOLVE);
-    if (ctx == nullptr) {
-        printf("Failed to allocate equix context\n");
-        return;
-    }
+extern "C" void solve_all_stages(uint64_t *hashes, uint8_t *out, uint32_t *sols, int num_sets) {
+    // Allocate device memory
+    uint64_t *d_hashes;
+    solver_heap *d_heaps;
+    equix_solution *d_solutions;
+    uint32_t *d_num_sols;
 
-    // Do the remaining stages
-    equix_solution solutions[EQUIX_MAX_SOLS];
-    uint32_t num_sols = equix_solver_solve(hashes, ctx->heap, solutions);
+    cudaMalloc(&d_hashes, num_sets * INDEX_SPACE * sizeof(uint64_t));
+    cudaMalloc(&d_heaps, num_sets * sizeof(solver_heap));
+    cudaMalloc(&d_solutions, num_sets * EQUIX_MAX_SOLS * sizeof(equix_solution));
+    cudaMalloc(&d_num_sols, num_sets * sizeof(uint32_t));
+
+    // Copy input data to device
+    cudaMemcpy(d_hashes, hashes, num_sets * INDEX_SPACE * sizeof(uint64_t), cudaMemcpyHostToDevice);
+
+    // Launch kernel
+    int threadsPerBlock = 256;
+    int blocksPerGrid = (num_sets + threadsPerBlock - 1) / threadsPerBlock;
+    solve_all_stages_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_hashes, d_heaps, d_solutions, d_num_sols);
 
     // Copy results back to host
-    memcpy(sols, &num_sols, sizeof(num_sols));
-    if (num_sols > 0) {
-        memcpy(out, solutions[0].idx, sizeof(solutions[0].idx));
+    equix_solution *h_solutions = new equix_solution[num_sets * EQUIX_MAX_SOLS];
+    uint32_t *h_num_sols = new uint32_t[num_sets];
+
+    cudaMemcpy(h_solutions, d_solutions, num_sets * EQUIX_MAX_SOLS * sizeof(equix_solution), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_num_sols, d_num_sols, num_sets * sizeof(uint32_t), cudaMemcpyDeviceToHost);
+
+    // Process results
+    for (int i = 0; i < num_sets; i++) {
+        sols[i] = h_num_sols[i];
+        if (h_num_sols[i] > 0) {
+            memcpy(out + i * sizeof(equix_solution), &h_solutions[i * EQUIX_MAX_SOLS], sizeof(equix_solution));
+        }
     }
 
-    // Free memory
-    equix_free(ctx);
+    // Free device memory
+    cudaFree(d_hashes);
+    cudaFree(d_heaps);
+    cudaFree(d_solutions);
+    cudaFree(d_num_sols);
+
+    // Free host memory
+    delete[] h_solutions;
+    delete[] h_num_sols;
 }
