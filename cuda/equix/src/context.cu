@@ -12,7 +12,7 @@ equix_ctx* equix_alloc(equix_ctx_flags flags) {
     equix_ctx* ctx = NULL;
     
     // Allocate unified memory for equix_ctx
-    if (cudaMallocManaged(&ctx, sizeof(equix_ctx)) != cudaSuccess) {
+    if (cudaHostAlloc(&ctx, sizeof(equix_ctx), cudaHostAllocDefault) != cudaSuccess) {
         return NULL; // Directly return NULL on failure
     }
     
@@ -29,7 +29,7 @@ equix_ctx* equix_alloc(equix_ctx_flags flags) {
     }
     
     if (flags & EQUIX_CTX_SOLVE) {
-        if (cudaMallocManaged(&ctx->heap, sizeof(solver_heap)) != cudaSuccess) {
+        if (cudaHostAlloc(&ctx->heap, sizeof(solver_heap), cudaHostAllocDefault) != cudaSuccess) {
             equix_free(ctx); // Free resources before returning
             return NULL;
         }

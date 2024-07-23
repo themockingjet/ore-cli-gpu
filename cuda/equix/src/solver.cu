@@ -297,8 +297,11 @@ __global__ void solve_all_stages_kernel(uint64_t* hashes, solver_heap* heaps, eq
     equix_solution* thread_solutions = &solutions[idx * EQUIX_MAX_SOLS];
     
     solve_stage0(thread_hashes, thread_heap);
+	__syncthreads();
     solve_stage1(thread_heap);
+	__syncthreads();
     solve_stage2(thread_heap);
+	__syncthreads();
     num_sols[idx] = solve_stage3(thread_heap, thread_solutions);
 }
 

@@ -8,7 +8,7 @@
 #include "equix/src/solver_heap.h"
 #include "hashx/src/context.h"
 
-const int BATCH_SIZE = 512;
+const int BATCH_SIZE = 256;
 
 extern "C" void hash(uint8_t *challenge, uint8_t *nonce, uint64_t *out) {
     // Allocate pinned memory for ctxs and hash_space

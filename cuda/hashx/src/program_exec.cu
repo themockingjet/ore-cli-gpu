@@ -81,18 +81,16 @@ __device__ uint64_t umulh(uint64_t a, uint64_t b) {
 
 #ifndef HAVE_SMULH
 __device__ int64_t smulh(int64_t a, int64_t b) {
-	int64_t hi = umulh(a, b);
-	if (a < 0LL) hi -= b;
-	if (b < 0LL) hi -= a;
-	return hi;
+    int64_t hi = umulh(a, b);
+    hi -= min(a, 0LL) * (b >> 63);
+    hi -= min(b, 0LL) * (a >> 63);
+    return hi;
 }
 #define HAVE_SMULH
 #endif
 
 __device__ static FORCE_INLINE uint64_t sign_extend_2s_compl(uint32_t x) {
-	return (-1 == ~0) ?
-		(int64_t)(int32_t)(x) :
-		(x > INT32_MAX ? (x | 0xffffffff00000000ULL) : (uint64_t)x);
+    return (uint64_t)(int64_t)(int32_t)x;
 }
 
 __device__ void hashx_program_execute(const hashx_program* program, uint64_t r[8]) {

@@ -540,7 +540,7 @@ static void print_registers(const generator_ctx* ctx) {
 bool hashx_program_generate(const siphash_state* key, hashx_program* program) {
 	generator_ctx ctx = {
 		.cycle = 0,
-		.sub_cycle = 0, /* 3 sub-cycles = 1 cycle */
+		.sub_cycle = 0,
 		.mul_count = 0,
 		.chain_mul = false,
 		.latency = 0,

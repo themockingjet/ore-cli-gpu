@@ -2,6 +2,12 @@ use std::{sync::Arc, time::Instant};
 
 use colored::*;
 
+#[cfg(feature = "gpu")]
+use drillx::{
+    Hash, Solution,
+};
+
+#[cfg(not(feature = "gpu"))]
 use drillx::{
     equix::{self},
     Hash, Solution,
@@ -208,6 +214,7 @@ impl Miner {
         let xbest = Arc::new(Mutex::new((0, 0, Hash::default())));
     
         loop {
+
             unsafe {
                 // Use GPU for hashing
                 hash(
