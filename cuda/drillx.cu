@@ -8,7 +8,7 @@
 #include "equix/src/solver_heap.h"
 #include "hashx/src/context.h"
 
-const int BATCH_SIZE = 256;
+const int BATCH_SIZE = 1024;
 
 extern "C" void hash(uint8_t *challenge, uint8_t *nonce, uint64_t *out) {
     // Allocate pinned memory for ctxs and hash_space
@@ -40,7 +40,7 @@ extern "C" void hash(uint8_t *challenge, uint8_t *nonce, uint64_t *out) {
     dim3 threadsPerBlock(256); // 256 threads per block
     dim3 blocksPerGrid((65536 * BATCH_SIZE + threadsPerBlock.x - 1) / threadsPerBlock.x); // enough blocks to cover batch
     do_hash_stage0i<<<blocksPerGrid, threadsPerBlock>>>(ctxs, hash_space);
-    cudaDeviceSynchronize();
+    
 
     // Copy hashes back to cpu
     for (int i = 0; i < BATCH_SIZE; i++) {
@@ -77,18 +77,21 @@ extern "C" void solve_all_stages(uint64_t *hashes, uint8_t *out, uint32_t *sols,
     cudaMalloc(&d_solutions, num_sets * EQUIX_MAX_SOLS * sizeof(equix_solution));
     cudaMalloc(&d_num_sols, num_sets * sizeof(uint32_t));
 
+    // Allocate pinned host memory
+    equix_solution *h_solutions;
+    uint32_t *h_num_sols;
+    cudaHostAlloc(&h_solutions, num_sets * EQUIX_MAX_SOLS * sizeof(equix_solution), cudaHostAllocDefault);
+    cudaHostAlloc(&h_num_sols, num_sets * sizeof(uint32_t), cudaHostAllocDefault);
+
     // Copy input data to device
     cudaMemcpy(d_hashes, hashes, num_sets * INDEX_SPACE * sizeof(uint64_t), cudaMemcpyHostToDevice);
 
     // Launch kernel
-    int threadsPerBlock = 256;
+    int threadsPerBlock = 1;
     int blocksPerGrid = (num_sets + threadsPerBlock - 1) / threadsPerBlock;
     solve_all_stages_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_hashes, d_heaps, d_solutions, d_num_sols);
 
-    // Copy results back to host
-    equix_solution *h_solutions = new equix_solution[num_sets * EQUIX_MAX_SOLS];
-    uint32_t *h_num_sols = new uint32_t[num_sets];
-
+    // Copy results back to host using pinned memory
     cudaMemcpy(h_solutions, d_solutions, num_sets * EQUIX_MAX_SOLS * sizeof(equix_solution), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_num_sols, d_num_sols, num_sets * sizeof(uint32_t), cudaMemcpyDeviceToHost);
 
@@ -106,7 +109,7 @@ extern "C" void solve_all_stages(uint64_t *hashes, uint8_t *out, uint32_t *sols,
     cudaFree(d_solutions);
     cudaFree(d_num_sols);
 
-    // Free host memory
-    delete[] h_solutions;
-    delete[] h_num_sols;
+    // Free pinned host memory
+    cudaFreeHost(h_solutions);
+    cudaFreeHost(h_num_sols);
 }

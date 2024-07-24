@@ -187,12 +187,12 @@ impl Miner {
     
         let mut hashes = vec![0u64; x_batch_size as usize * INDEX_SPACE];
         let mut x_nonce = 0u64;
-        let mut processed = 0;
     
         // Shared state wrapped in Arc<Mutex<>>
         let xbest = Arc::new(Mutex::new((0, 0, Hash::default())));
     
         loop {
+            let timer0 = Instant::now();
             unsafe {
                 // Use GPU for hashing
                 hash(
@@ -201,11 +201,17 @@ impl Miner {
                     hashes.as_mut_ptr() as *mut u64,
                 );
             }
+            progress_bar.set_message(format!(
+                "GPU hashed {} nonces in {} ms",
+                x_batch_size,
+                timer0.elapsed().as_millis()
+            ));
 
             // Allocate memory for results
             let mut digest = vec![0u8; x_batch_size as usize * 16]; // 16 bytes per solution
             let mut sols = vec![0u32; x_batch_size as usize];
             
+            let timer1 = Instant::now();
             unsafe {
                 // Use GPU for solving all stages
                 solve_all_stages(
@@ -215,6 +221,11 @@ impl Miner {
                     x_batch_size as i32,
                 );
             }
+            progress_bar.set_message(format!(
+                "GPU solved {} hashes in {} ms",
+                x_batch_size,
+                timer1.elapsed().as_millis()
+            ));
             
             // Parallel processing with Rayon
             let chunk_size = x_batch_size as usize / threads;
@@ -253,7 +264,6 @@ impl Miner {
     
             // Increment nonce for next batch
             x_nonce += x_batch_size as u64;
-            processed += x_batch_size as usize;
     
             // Update progress bar
             let elapsed = timer.elapsed().as_secs();
@@ -262,12 +272,11 @@ impl Miner {
                 xbest.1
             };
     
-            progress_bar.set_message(format!(
-                "Mining with GPU... (Best difficulty: {}, Time Remaining: {}s, Processed: {})",
-                best_difficulty,
-                cutoff_time.saturating_sub(elapsed),
-                processed
-            ));
+            // progress_bar.set_message(format!(
+            //     "Mining with GPU... (Best difficulty: {}, Time Remaining: {}s)",
+            //     best_difficulty,
+            //     cutoff_time.saturating_sub(elapsed)
+            // ));
     
             if timer.elapsed().as_secs() >= cutoff_time {
                 let xbest = xbest.lock().unwrap();

@@ -41,9 +41,9 @@ equix_ctx* equix_alloc(equix_ctx_flags flags) {
 void equix_free(equix_ctx* ctx) {
 	if (ctx != NULL && ctx != EQUIX_NOTSUPP) {
 		if (ctx->flags & EQUIX_CTX_SOLVE) {
-			cudaFree(ctx->heap);
+			cudaFreeHost(ctx->heap);
 		}
 		hashx_free(ctx->hash_func);
-		cudaFree(ctx);
+		cudaFreeHost(ctx);
 	}
 }
