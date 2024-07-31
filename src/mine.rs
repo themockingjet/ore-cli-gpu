@@ -193,7 +193,6 @@ impl Miner {
         let xbest = Arc::new(Mutex::new((0, 0, Hash::default())));
     
         loop {
-            let timer2 = Instant::now();
             unsafe {
                 // Use GPU for hashing
                 hash(
@@ -202,7 +201,6 @@ impl Miner {
                     hashes.as_mut_ptr() as *mut u64,
                 );
             }
-            println!("Hashing took {} ms", timer2.elapsed().as_millis());
 
             // Allocate memory for results
             let mut digest = vec![0u8; x_batch_size as usize * 16]; // 16 bytes per solution

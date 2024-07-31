@@ -36,7 +36,7 @@ extern "C" void hash(uint8_t *challenge, uint8_t *nonce, uint64_t *out) {
     }
 
     // Launch kernel to parallelize hashx operations
-    dim3 threadsPerBlock(256); // 256 threads per block
+    dim3 threadsPerBlock(1024); // 256 threads per block
     dim3 blocksPerGrid((65536 * BATCH_SIZE + threadsPerBlock.x - 1) / threadsPerBlock.x); // enough blocks to cover batch
     do_hash_stage0i<<<blocksPerGrid, threadsPerBlock>>>(ctxs, hash_space);
     
