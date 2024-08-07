@@ -8,7 +8,7 @@
 #include "equix/src/solver_heap.h"
 #include "hashx/src/context.h"
 
-const int BATCH_SIZE = 512;
+const int BATCH_SIZE = 2048;
 
 extern "C" void hash(uint8_t *challenge, uint8_t *nonce, uint64_t *out) {
     // Allocate pinned memory for ctxs and hash_space
@@ -86,7 +86,7 @@ extern "C" void solve_all_stages(uint64_t *hashes, uint8_t *out, uint32_t *sols,
     cudaMemcpy(d_hashes, hashes, num_sets * INDEX_SPACE * sizeof(uint64_t), cudaMemcpyHostToDevice);
 
     // Launch kernel
-    int threadsPerBlock = 1;
+    int threadsPerBlock = 256;
     int blocksPerGrid = (num_sets + threadsPerBlock - 1) / threadsPerBlock;
     solve_all_stages_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_hashes, d_heaps, d_solutions, d_num_sols);
 
